@@ -1,4 +1,11 @@
 public class HuntParallel {
+
+    public enum Direction {
+        STAY,
+        UP, DOWN, LEFT, RIGHT,
+        UP_LEFT, UP_RIGHT, DOWN_LEFT, DOWN_RIGHT
+    }
+
     private final int id;
     private final int startRow, startCol;
     private final DungeonMapParallel dungeon;
