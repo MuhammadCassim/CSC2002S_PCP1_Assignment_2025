@@ -1,105 +1,109 @@
+// copied from DungeonMap.java
+
 import java.util.Random;
-import java.util.concurrent.ForkJoinPool;
-import java.util.concurrent.RecursiveTask;
+import javax.imageio.ImageIO;
+import java.awt.Color;
+import java.awt.image.BufferedImage;
+import java.io.File;
 
-public class DungeonHunterParallel {
-    static final boolean DEBUG = false;
-    static long startTime = 0;
-    static long endTime = 0;
-    private static void tick() { startTime = System.currentTimeMillis(); }
-    private static void tock() { endTime = System.currentTimeMillis(); }
+public class DungeonMapParallel {
 
-    // ✅ Result wrapper (mana + coordinates)
-    static class Result {
-        final int mana;
-        final double x, y;
-        Result(int mana, double x, double y) {
-            this.mana = mana;
-            this.x = x;
-            this.y = y;
-        }
-    }
+    public static final int PRECISION = 10000;
+    public static final int RESOLUTION = 5;
 
-    public static void main(String[] args) {
-        if (args.length != 3) {
-            System.out.println("Usage: java DungeonHunterParallel <gridSize> <density> <seed>");
-            System.exit(1);
-        }
+    private int rows, columns; // dungeonGrid size
+    private double xmin, xmax, ymin, ymax; // x and y dungeon limits
+    private int [][] manaMap;
+    private int [][] visit;
+    private int dungeonGridPointsEvaluated;
+    private double bossX;
+    private double bossY;
+    private double decayFactor;  
 
-        int gateSize = Integer.parseInt(args[0]);
-        double density = Double.parseDouble(args[1]);
-        int randomSeed = Integer.parseInt(args[2]);
+    // constructor
+    public DungeonMapParallel(double xmin, double xmax, 
+                              double ymin, double ymax, 
+                              int seed) {
+        super();
+        this.xmin = xmin;
+        this.xmax = xmax;
+        this.ymin = ymin;
+        this.ymax = ymax;
 
-        double xmin = -gateSize, xmax = gateSize, ymin = -gateSize, ymax = gateSize;
-        DungeonMapParallel dungeon = new DungeonMapParallel(xmin, xmax, ymin, ymax, randomSeed);
+        this.rows = (int) Math.round((xmax-xmin)*RESOLUTION); 
+        this.columns = (int) Math.round((ymax-ymin)*RESOLUTION);
 
-        int numSearches = (int) (density * (gateSize * 2) * (gateSize * 2) * DungeonMapParallel.RESOLUTION);
-        Random rand = new Random(randomSeed);
+        // Randomly place the boss peak
+        Random rand;
+        if(seed==0) rand= new Random(); // no fixed seed
+        else rand= new Random(seed);
+        double xRange = xmax - xmin;
+        this.bossX = xmin + (xRange) * rand.nextDouble();
+        this.bossY = ymin + (ymax - ymin) * rand.nextDouble();
 
-        tick();
-        ForkJoinPool pool = new ForkJoinPool();
-        Result best = pool.invoke(new SearchTask(dungeon, numSearches, rand));
-        tock();
+        // Calculate decay factor based on range
+        this.decayFactor = 2.0 / (xRange * 0.1);  
 
-        // ✅ Output in the same style as serial version
-        System.out.printf("\tdungeon size: %d\n", gateSize);
-        System.out.printf("\trows: %d, columns: %d\n", dungeon.getRows(), dungeon.getColumns());
-        System.out.printf("\tNumber searches: %d\n", numSearches);
-        System.out.printf("\n\ttime: %d ms\n", endTime - startTime);
-        System.out.printf("Dungeon Master (mana %d) found at:  x=%.1f y=%.1f\n",
-                best.mana, best.x, best.y);
+        manaMap = new int[rows][columns];
+        visit = new int[rows][columns];
+        dungeonGridPointsEvaluated=0;
 
-        dungeon.visualisePowerMap("parallelSearch.png", false);
-        dungeon.visualisePowerMap("parallelSearchPath.png", true);
-    }
-
-    // ✅ Fork/Join Task returning Result
-    static class SearchTask extends RecursiveTask<Result> {
-        private static final int SEQUENTIAL_CUTOFF = 500;
-        private final DungeonMapParallel dungeon;
-        private final int numSearches;
-        private final Random rand;
-
-        SearchTask(DungeonMapParallel dungeon, int numSearches, Random rand) {
-            this.dungeon = dungeon;
-            this.numSearches = numSearches;
-            this.rand = rand;
-        }
-
-        @Override
-        protected Result compute() {
-            if (numSearches <= SEQUENTIAL_CUTOFF) {
-                int bestMana = Integer.MIN_VALUE;
-                double bestX = 0, bestY = 0;
-
-                Random localRand = new Random(rand.nextLong()); // thread-local seed
-
-                for (int i = 0; i < numSearches; i++) {
-                    HuntParallel search = new HuntParallel(
-                            i + 1,
-                            localRand.nextInt(dungeon.getRows()),
-                            localRand.nextInt(dungeon.getColumns()),
-                            dungeon
-                    );
-                    int localMana = search.findManaPeak();
-                    if (localMana > bestMana) {
-                        bestMana = localMana;
-                        bestX = search.getBestX();
-                        bestY = search.getBestY();
-                    }
-                }
-                return new Result(bestMana, bestX, bestY);
-            } else {
-                int half = numSearches / 2;
-                SearchTask left = new SearchTask(dungeon, half, new Random(rand.nextLong()));
-                SearchTask right = new SearchTask(dungeon, numSearches - half, new Random(rand.nextLong()));
-
-                left.fork();
-                Result rightResult = right.compute();
-                Result leftResult = left.join();
-
-                return (leftResult.mana > rightResult.mana) ? leftResult : rightResult;
+        /* Terrain initialization */
+        for(int i=0; i<rows; i++ ) {
+            for( int j=0; j<columns; j++ ) {
+                manaMap[i][j] = Integer.MIN_VALUE; // means mana not yet measured
+                visit[i][j] = -1; // grid point not yet visited
             }
         }
+    }
+
+    // has this site been visited before?
+    boolean visited(int x, int y) {
+        return visit[x][y] != -1;
+    }
+
+    void setVisited(int x, int y, int id) {
+        if (visit[x][y]==-1) // don't reset
+            visit[x][y]= id;
+    }
+
+    /**
+     * Evaluates mana at a dungeonGrid coordinate (x, y) in the dungeon,
+     * and writes it to the map.
+     *
+     * @param x The row index
+     * @param y The column index
+     * @return The mana value at (x, y).
+     */
+    int getManaLevel(int x, int y) {
+        // Gaussian hill centered at bossX,bossY
+        double xCoord = xmin + ((double)x / RESOLUTION);
+        double yCoord = ymin + ((double)y / RESOLUTION);
+        double dist2 = Math.pow(xCoord - bossX, 2) + Math.pow(yCoord - bossY, 2);
+        double manaVal = Math.exp(-decayFactor * dist2) * PRECISION;
+        return (int)Math.round(manaVal);
+    }
+
+    public int getRows() { return rows; }
+    public int getColumns() { return columns; }
+
+    // --- Added missing methods ---
+    public boolean isValid(int row, int col) {
+        return row >= 0 && row < rows && col >= 0 && col < columns;
+    }
+
+    public int getMana(int row, int col) {
+        if (manaMap[row][col] == Integer.MIN_VALUE) {
+            manaMap[row][col] = getManaLevel(row, col);
+        }
+        return manaMap[row][col];
+    }
+
+    public double getX(int row) {
+        return xmin + ((double) row / RESOLUTION);
+    }
+
+    public double getY(int col) {
+        return ymin + ((double) col / RESOLUTION);
     }
 }
