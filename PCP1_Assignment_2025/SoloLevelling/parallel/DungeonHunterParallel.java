@@ -9,6 +9,17 @@ public class DungeonHunterParallel {
     private static void tick() { startTime = System.currentTimeMillis(); }
     private static void tock() { endTime = System.currentTimeMillis(); }
 
+    // ✅ Result wrapper (mana + coordinates)
+    static class Result {
+        final int mana;
+        final double x, y;
+        Result(int mana, double x, double y) {
+            this.mana = mana;
+            this.x = x;
+            this.y = y;
+        }
+    }
+
     public static void main(String[] args) {
         if (args.length != 3) {
             System.out.println("Usage: java DungeonHunterParallel <gridSize> <density> <seed>");
@@ -27,23 +38,23 @@ public class DungeonHunterParallel {
 
         tick();
         ForkJoinPool pool = new ForkJoinPool();
-        SearchTask task = new SearchTask(dungeon, numSearches, rand);
-        int max = pool.invoke(task);
+        Result best = pool.invoke(new SearchTask(dungeon, numSearches, rand));
         tock();
 
-        // Output results (similar to serial version)
+        // ✅ Output in the same style as serial version
         System.out.printf("\tdungeon size: %d\n", gateSize);
         System.out.printf("\trows: %d, columns: %d\n", dungeon.getRows(), dungeon.getColumns());
         System.out.printf("\tNumber searches: %d\n", numSearches);
         System.out.printf("\n\ttime: %d ms\n", endTime - startTime);
-        System.out.printf("\tBest mana found: %d\n", max);
+        System.out.printf("Dungeon Master (mana %d) found at:  x=%.1f y=%.1f\n",
+                best.mana, best.x, best.y);
 
         dungeon.visualisePowerMap("parallelSearch.png", false);
         dungeon.visualisePowerMap("parallelSearchPath.png", true);
     }
 
-    // 🔹 Inner Fork/Join Task (instead of separate file)
-    static class SearchTask extends RecursiveTask<Integer> {
+    // ✅ Fork/Join Task returning Result
+    static class SearchTask extends RecursiveTask<Result> {
         private static final int SEQUENTIAL_CUTOFF = 500;
         private final DungeonMapParallel dungeon;
         private final int numSearches;
@@ -56,27 +67,38 @@ public class DungeonHunterParallel {
         }
 
         @Override
-        protected Integer compute() {
+        protected Result compute() {
             if (numSearches <= SEQUENTIAL_CUTOFF) {
-                int max = Integer.MIN_VALUE;
+                int bestMana = Integer.MIN_VALUE;
+                double bestX = 0, bestY = 0;
+
+                Random localRand = new Random(rand.nextLong()); // thread-local seed
+
                 for (int i = 0; i < numSearches; i++) {
-                    HuntParallel search = new HuntParallel(i + 1,
-                            rand.nextInt(dungeon.getRows()),
-                            rand.nextInt(dungeon.getColumns()),
-                            dungeon);
-                    int localMax = search.findManaPeak();
-                    max = Math.max(max, localMax);
+                    HuntParallel search = new HuntParallel(
+                            i + 1,
+                            localRand.nextInt(dungeon.getRows()),
+                            localRand.nextInt(dungeon.getColumns()),
+                            dungeon
+                    );
+                    int localMana = search.findManaPeak();
+                    if (localMana > bestMana) {
+                        bestMana = localMana;
+                        bestX = search.getBestX();
+                        bestY = search.getBestY();
+                    }
                 }
-                return max;
+                return new Result(bestMana, bestX, bestY);
             } else {
                 int half = numSearches / 2;
-                SearchTask left = new SearchTask(dungeon, half, rand);
-                SearchTask right = new SearchTask(dungeon, numSearches - half, rand);
+                SearchTask left = new SearchTask(dungeon, half, new Random(rand.nextLong()));
+                SearchTask right = new SearchTask(dungeon, numSearches - half, new Random(rand.nextLong()));
 
                 left.fork();
-                int rightMax = right.compute();
-                int leftMax = left.join();
-                return Math.max(leftMax, rightMax);
+                Result rightResult = right.compute();
+                Result leftResult = left.join();
+
+                return (leftResult.mana > rightResult.mana) ? leftResult : rightResult;
             }
         }
     }
