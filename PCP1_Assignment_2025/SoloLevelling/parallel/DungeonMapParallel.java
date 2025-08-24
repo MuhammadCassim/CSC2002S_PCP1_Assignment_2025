@@ -115,8 +115,8 @@ public class DungeonMapParallel {
      * @param y_coord The y-coordinate in the dungeon grid.
      * @return the direction of highest mana.
      */
-	Hunt.Direction getNextStepDirection( int x, int y) {
-		Hunt.Direction climbDirection = Hunt.Direction.STAY;
+	HuntParallel.Direction getNextStepDirection( int x, int y) {
+		HuntParallel.Direction climbDirection = HuntParallel.Direction.STAY;
 	    int localMax = getManaLevel(x, y);
 
 	    // Define directions with (dx, dy)
@@ -131,15 +131,15 @@ public class DungeonMapParallel {
 	        { 1,  1}  // DOWN_RIGHT
 	    };
 
-	    Hunt.Direction[] directionEnums = {
-	        Hunt.Direction.LEFT,
-	        Hunt.Direction.RIGHT,
-	        Hunt.Direction.UP,
-	        Hunt.Direction.DOWN,
-	        Hunt.Direction.UP_LEFT,
-	        Hunt.Direction.UP_RIGHT,
-	        Hunt.Direction.DOWN_LEFT,
-	        Hunt.Direction.DOWN_RIGHT
+	    HuntParallel.Direction[] directionEnums = {
+	        HuntParallel.Direction.LEFT,
+	        HuntParallel.Direction.RIGHT,
+	        HuntParallel.Direction.UP,
+	        HuntParallel.Direction.DOWN,
+	        HuntParallel.Direction.UP_LEFT,
+	        HuntParallel.Direction.UP_RIGHT,
+	        HuntParallel.Direction.DOWN_LEFT,
+	        HuntParallel.Direction.DOWN_RIGHT
 	    };
 
 	    for (int i = 0; i < directions.length; i++) {
